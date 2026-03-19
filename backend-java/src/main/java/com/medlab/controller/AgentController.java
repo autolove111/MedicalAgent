@@ -1,219 +1,163 @@
 package com.medlab.controller;
 
-import com.medlab.agent.BailianMedicalAgent;
-import com.medlab.service.KnowledgeService;
+import com.medlab.service.SessionChatService;
 import com.medlab.service.StorageService;
+import com.medlab.service.UserMedicalService;
+import com.medlab.service.MedicalFacadeService;
+import com.medlab.util.JwtTokenProvider;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.UUID;
 
-/**
- * AI智能体API控制器
- * 处理所有HTTP请求，是前端和后端的通信桥梁
- * 
- * 职责：
- * 1. 接收客户端HTTP请求
- * 2. 调用相应的服务进行业务处理
- * 3. 返回结果给客户端
- * 4. 错误处理和异常返回
- */
 @RestController
 @RequestMapping("/api/v1")
-@CrossOrigin(origins = "*")  // 允许跨域请求
+@CrossOrigin(origins = "*")
 public class AgentController {
-    
+
+    private static final Logger logger = LoggerFactory.getLogger(AgentController.class);
+
+    @Value("${langchain.service.url:http://localhost:8000}")
+    private String langchainServiceUrl;
+
     @Autowired
-    private BailianMedicalAgent bailianMedicalAgent;
-    
+    private WebClient.Builder webClientBuilder;
+
     @Autowired
-    private KnowledgeService knowledgeService;
-    
+    private UserMedicalService userMedicalService;
+
     @Autowired
-    private StorageService storageService;
-    
+    private JwtTokenProvider jwtTokenProvider;
+
+    @Autowired
+    private SessionChatService sessionChatService;
+
+    @Autowired
+    private MedicalFacadeService medicalFacadeService;
+
+    private WebClient getWebClient() {
+        return webClientBuilder.baseUrl(langchainServiceUrl).build();
+    }
+
     /**
-     * 健康检查端点
-     * 用于验证服务是否正常运行
+     * 流式聊天接口：负责提取用户ID并转发给 Python Agent
      */
+    @PostMapping(value = "/agent/chat/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter streamChat(@RequestParam String userQuery,
+                                 @RequestHeader(value = "Authorization", required = false) String authHeader) {
+        SseEmitter emitter = new SseEmitter(0L);
+        
+        // 1. 尝试从 Token 中提取 userId
+        String currentUserId = null;
+        if (authHeader != null && authHeader.startsWith("Bearer ")) {
+            try {
+                String token = authHeader.substring(7);
+                if (jwtTokenProvider.validateToken(token)) {
+                    currentUserId = jwtTokenProvider.getUserIdFromToken(token).toString();
+                    logger.info("成功识别登录用户 ID: {}", currentUserId);
+                }
+            } catch (Exception e) {
+                logger.warn("Token 解析失败，将以匿名模式继续: {}", e.getMessage());
+            }
+        }
+
+        // 2. 【核心修复】定义 final 变量供 Lambda 使用
+        final String finalUserId = currentUserId;
+
+        try {
+            WebClient client = getWebClient();
+
+            // 3. 构建请求并转发给 Python 侧
+            client.post()
+                    .uri(uriBuilder -> {
+                        var builder = uriBuilder.path("/api/v1/agent/chat/stream")
+                                .queryParam("userQuery", userQuery);
+                        // 如果有用户ID，则挂载到 URL 参数中
+                        if (finalUserId != null) {
+                            builder.queryParam("userId", finalUserId);
+                        }
+                        return builder.build();
+                    })
+                    .header("Authorization", authHeader != null ? authHeader : "")
+                    .accept(MediaType.TEXT_EVENT_STREAM)
+                    .retrieve()
+                    .bodyToFlux(String.class)
+                    .subscribe(
+                            chunk -> {
+                                try {
+                                    emitter.send(chunk);
+                                } catch (Exception e) {
+                                    emitter.completeWithError(e);
+                                }
+                            },
+                            err -> {
+                                logger.error("转发 Python 流时发生错误: ", err);
+                                emitter.completeWithError(err);
+                            },
+                            () -> emitter.complete()
+                    );
+        } catch (Exception e) {
+            logger.error("初始化 WebClient 请求失败: ", e);
+            emitter.completeWithError(e);
+        }
+        
+        return emitter;
+    }
+
+    /**
+     * 内部调用接口：供 Python Agent 以后台方式查询病历
+     */
+    @GetMapping("/internal/user/medical-history")
+    public ResponseEntity<Map<String, String>> getMedicalHistoryById(@RequestParam("userId") String userId) {
+        Map<String, String> resp = new HashMap<>();
+        try {
+            UUID uid = UUID.fromString(userId);
+            String history = userMedicalService.getMedicalHistory(uid);
+            String drug = userMedicalService.getDrugAllergy(uid);
+
+            resp.put("status", "success");
+            resp.put("medicalHistory", history != null ? history : "暂无病历记录");
+            resp.put("drugAllergy", drug != null ? drug : "无已知过敏史");
+            return ResponseEntity.ok(resp);
+        } catch (Exception e) {
+            resp.put("status", "error");
+            resp.put("message", "无效的 UUID 格式");
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(resp);
+        }
+    }
+
     @GetMapping("/health")
     public ResponseEntity<Map<String, String>> health() {
         Map<String, String> response = new HashMap<>();
         response.put("status", "UP");
-        response.put("message", "MedLabAgent System is running");
+        response.put("message", "MedLabAgent Backend is running");
         return ResponseEntity.ok(response);
     }
-    
-    /**
-     * 分析医疗报告
-     * 使用百炼千问AI进行分析
-     * 
-     * @param reportContent 医疗报告内容
-     * @return 分析结果
-     */
-    @PostMapping("/agent/analyze-report")
-    public ResponseEntity<Map<String, String>> analyzeReport(
-            @RequestParam String reportContent) {
-        try {
-            String analysis = bailianMedicalAgent.analyzeReport(reportContent);
-            
-            Map<String, String> response = new HashMap<>();
-            response.put("status", "success");
-            response.put("analysis", analysis);
-            return ResponseEntity.ok(response);
-        } catch (Exception e) {
-            Map<String, String> errorResponse = new HashMap<>();
-            errorResponse.put("status", "error");
-            errorResponse.put("message", e.getMessage());
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
-        }
+
+    // 其他业务接口保持转发逻辑即可...
+    @PostMapping("/agent/analyze")
+    public ResponseEntity<Map<String, String>> analyzeReport(@RequestParam String reportContent,
+                                                             @RequestHeader(value = "Authorization", required = false) String authHeader) {
+        return ResponseEntity.ok(sessionChatService.analyzeWithAuth(authHeader, reportContent));
     }
-    
-    /**
-     * AI对话端点
-     * 使用百炼千问AI进行医学咨询
-     * 
-     * @param userQuery 用户问题
-     * @return 智能回答
-     */
-    @PostMapping("/agent/chat")
-    public ResponseEntity<Map<String, String>> chat(
-            @RequestParam String userQuery) {
-        try {
-            String aiResponse = bailianMedicalAgent.chat(userQuery);
-            
-            Map<String, String> result = new HashMap<>();
-            result.put("status", "success");
-            result.put("response", aiResponse);
-            return ResponseEntity.ok(result);
-        } catch (Exception e) {
-            Map<String, String> errorResponse = new HashMap<>();
-            errorResponse.put("status", "error");
-            errorResponse.put("message", e.getMessage());
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
-        }
-    }
-    
-    /**
-     * 获取诊断建议
-     * 
-     * @param symptoms 症状描述
-     * @return 诊断建议
-     */
-    @PostMapping("/agent/diagnosis")
-    public ResponseEntity<Map<String, String>> getDiagnosisSuggestion(
-            @RequestParam String symptoms) {
-        try {
-            String suggestion = bailianMedicalAgent.getDiagnosisSuggestion(symptoms);
-            
-            Map<String, String> result = new HashMap<>();
-            result.put("status", "success");
-            result.put("suggestion", suggestion);
-            return ResponseEntity.ok(result);
-        } catch (Exception e) {
-            Map<String, String> errorResponse = new HashMap<>();
-            errorResponse.put("status", "error");
-            errorResponse.put("message", e.getMessage());
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
-        }
-    }
-    
-    /**
-     * 获取医学知识
-     * 
-     * @param topic 医学主题
-     * @return 医学知识
-     */
-    @PostMapping("/agent/knowledge")
-    public ResponseEntity<Map<String, String>> getMedicalKnowledge(
-            @RequestParam String topic) {
-        try {
-            String knowledge = bailianMedicalAgent.getMedicalKnowledge(topic);
-            
-            Map<String, String> result = new HashMap<>();
-            result.put("status", "success");
-            result.put("knowledge", knowledge);
-            return ResponseEntity.ok(result);
-        } catch (Exception e) {
-            Map<String, String> errorResponse = new HashMap<>();
-            errorResponse.put("status", "error");
-            errorResponse.put("message", e.getMessage());
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
-        }
-    }
-    
-    /**
-     * 解释医学术语
-     * 
-     * @param term 医学术语
-     * @return 术语解释
-     */
-    @PostMapping("/agent/explain-term")
-    public ResponseEntity<Map<String, String>> explainMedicalTerm(
-            @RequestParam String term) {
-        try {
-            String explanation = bailianMedicalAgent.explainMedicalTerm(term);
-            
-            Map<String, String> result = new HashMap<>();
-            result.put("status", "success");
-            result.put("explanation", explanation);
-            return ResponseEntity.ok(result);
-        } catch (Exception e) {
-            Map<String, String> errorResponse = new HashMap<>();
-            errorResponse.put("status", "error");
-            errorResponse.put("message", e.getMessage());
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
-        }
-    }
-    
-    /**
-     * 上传医疗报告文件
-     * 
-     * @param file 上传的文件
-     * @return 文件保存路径
-     */
+
     @PostMapping("/agent/upload-report")
     public ResponseEntity<Map<String, String>> uploadReport(
-            @RequestParam("file") MultipartFile file) {
-        try {
-            String filePath = storageService.saveFile(file);
-            
-            Map<String, String> response = new HashMap<>();
-            response.put("status", "success");
-            response.put("filePath", filePath);
-            response.put("fileName", file.getOriginalFilename());
-            return ResponseEntity.ok(response);
-        } catch (Exception e) {
-            Map<String, String> errorResponse = new HashMap<>();
-            errorResponse.put("status", "error");
-            errorResponse.put("message", e.getMessage());
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
-        }
-    }
-    
-    /**
-     * 获取知识库中的信息
-     */
-    @GetMapping("/knowledge/search")
-    public ResponseEntity<Map<String, Object>> searchKnowledge(
-            @RequestParam String keyword) {
-        try {
-            var records = knowledgeService.searchByKeyword(keyword);
-            
-            Map<String, Object> response = new HashMap<>();
-            response.put("status", "success");
-            response.put("results", records);
-            response.put("count", records.size());
-            return ResponseEntity.ok(response);
-        } catch (Exception e) {
-            Map<String, Object> errorResponse = new HashMap<>();
-            errorResponse.put("status", "error");
-            errorResponse.put("message", e.getMessage());
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
-        }
+            @RequestParam("file") MultipartFile file,
+            @RequestHeader(value = "Authorization", required = false) String authHeader) {
+        return ResponseEntity.ok(medicalFacadeService.handleUploadAndAppend(file, authHeader));
     }
 }

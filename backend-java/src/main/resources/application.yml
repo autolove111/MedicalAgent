@@ -3,10 +3,13 @@
 # ========================================
 
 spring:
+  profiles:
+    active: prod
+
   application:
     name: medlab-agent-system
 
-  # Database Configuration (Optional - will use H2 if PostgreSQL unavailable)
+  # Database Configuration - PostgreSQL
   datasource:
     url: jdbc:postgresql://localhost:5432/medlab_db
     username: medlab_user
@@ -18,10 +21,10 @@ spring:
 
   # JPA/Hibernate Configuration
   jpa:
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
     hibernate:
       ddl-auto: update
-    database-platform: org.hibernate.dialect.PostgreSQLDialect
-    show-sql: false
+    show-sql: true
     properties:
       hibernate:
         format_sql: true
@@ -32,6 +35,24 @@ spring:
       allowed-origins: "*"
       allowed-methods: GET,POST,PUT,DELETE,OPTIONS
       max-age: 3600
+
+# JWT Configuration
+jwt:
+  secret: ${JWT_SECRET:your-super-secret-key-change-this-in-production-environment-variable}
+  expiration: ${JWT_EXPIRATION:86400000}
+
+# LangChain 服务配置
+langchain:
+  service:
+    url: ${LANGCHAIN_SERVICE_URL:http://localhost:8000}
+    timeout-ms: 60000
+
+# MinIO Configuration (Object Storage)
+minio:
+  endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
+  access-key: ${MINIO_ACCESS_KEY:minioadmin}
+  secret-key: ${MINIO_SECRET_KEY:minioadmin}
+  bucket-name: ${MINIO_BUCKET:medlab-reports}
 
 # Server Configuration
 server:
@@ -49,29 +70,3 @@ logging:
     file: "%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
   file:
     name: logs/medlab-agent.log
-
-# AI Service Configuration
-ai:
-  # Ollama Configuration
-  ollama:
-    base-url: http://localhost:11434
-    model: llama2
-    temperature: 0.7
-    max-tokens: 1000
-
-  # Bailian Qianwen Configuration
-  bailian:
-    api-key: sk-7abf8a7f73354b7583e99596c5170d83
-    model: qwen-turbo
-    base-url: https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation
-    temperature: 0.7
-    top-p: 0.95
-    max-tokens: 2000
-    timeout: 60000
-
-# External Services
-services:
-  ocr:
-    base-url: http://localhost:8000
-    endpoint: /api/v1/ocr
-    timeout: 30000

@@ -1,0 +1,27 @@
+2026-03-08 19:25:00 jdbc[8]: exception
+org.h2.jdbc.JdbcSQLSyntaxErrorException: Syntax error in SQL statement "SELECT * FROM USERS REPORT_ITEMS [*]CHAT_MESSAGES"; SQL statement:
+SELECT * FROM USERS REPORT_ITEMS CHAT_MESSAGES [42000-214]
+2026-03-08 19:25:03 jdbc[8]: exception
+org.h2.jdbc.JdbcSQLSyntaxErrorException: Syntax error in SQL statement "SELECT * FROM USERS REPORT_ITEMS [*]CHAT_MESSAGES KNOWLEDGE_RECORDS"; SQL statement:
+SELECT * FROM USERS REPORT_ITEMS CHAT_MESSAGES KNOWLEDGE_RECORDS [42000-214]
+2026-03-08 19:25:07 jdbc[8]: exception
+org.h2.jdbc.JdbcSQLSyntaxErrorException: Syntax error in SQL statement "SELECT * FROM USERS REPORT_ITEMS [*]CHAT_MESSAGES KNOWLEDGE_RECORDS USERS"; SQL statement:
+SELECT * FROM USERS REPORT_ITEMS CHAT_MESSAGES KNOWLEDGE_RECORDS USERS [42000-214]
+2026-03-08 19:25:39 jdbc[8]: exception
+org.h2.jdbc.JdbcSQLSyntaxErrorException: Syntax error in SQL statement "[*]USERS"; expected "UPDATE, USE"; SQL statement:
+USERS [42001-214]
+2026-03-08 19:25:43 jdbc[8]: exception
+org.h2.jdbc.JdbcSQLSyntaxErrorException: Syntax error in SQL statement "[*]USERS"; expected "UPDATE, USE"; SQL statement:
+USERS [42001-214]
+2026-03-08 19:25:44 jdbc[8]: exception
+org.h2.jdbc.JdbcSQLSyntaxErrorException: Syntax error in SQL statement "[*]USERS"; expected "UPDATE, USE"; SQL statement:
+USERS [42001-214]
+2026-03-08 19:25:44 jdbc[8]: exception
+org.h2.jdbc.JdbcSQLSyntaxErrorException: Syntax error in SQL statement "[*]USERS"; expected "UPDATE, USE"; SQL statement:
+USERS [42001-214]
+2026-03-08 19:25:44 jdbc[8]: exception
+org.h2.jdbc.JdbcSQLSyntaxErrorException: Syntax error in SQL statement "[*]USERS"; expected "UPDATE, USE"; SQL statement:
+USERS [42001-214]
+2026-03-08 19:25:46 jdbc[8]: exception
+org.h2.jdbc.JdbcSQLSyntaxErrorException: Syntax error in SQL statement "[*]USERS USERS"; expected "UPDATE, USE"; SQL statement:
+USERS USERS [42001-214]

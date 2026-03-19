@@ -7,9 +7,9 @@ spring:
   application:
     name: medlab-agent-system
 
-  # H2 Database Configuration (内存数据库)
+  # H2 Database Configuration (文件数据库 - 数据持久化)
   datasource:
-    url: jdbc:h2:mem:medlab_db
+    url: jdbc:h2:file:./data/medlab_db;MODE=MySQL
     driver-class-name: org.h2.Driver
     username: sa
     password:
@@ -21,7 +21,7 @@ spring:
   jpa:
     database-platform: org.hibernate.dialect.H2Dialect
     hibernate:
-      ddl-auto: create-drop # 每次启动创建新表，关闭时删除
+      ddl-auto: update # 更新表结构，保留数据
     show-sql: false
     properties:
       hibernate:
@@ -52,3 +52,9 @@ logging:
     com.medlab: DEBUG
   pattern:
     console: "%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
+
+# LangChain 服务配置
+langchain:
+  service:
+    url: ${LANGCHAIN_SERVICE_URL:http://localhost:8000}
+    timeout-ms: 60000
