@@ -41,6 +41,7 @@ public class SecurityConfig {
                 .requestMatchers("/", "/index.html", "/static/**", "/favicon.ico", "/assets/**").permitAll()
                 .requestMatchers("/api/v1/health").permitAll()
                 .requestMatchers("/api/v1/auth/**").permitAll()
+                .requestMatchers("/api/v1/file/view/**", "/api/v1/file/health").permitAll()
                     
                 // 👇 新增这一行：允许 Python 服务访问内部数据接口
                 .requestMatchers("/api/v1/internal/**").permitAll()
