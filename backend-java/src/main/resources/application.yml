@@ -9,6 +9,12 @@ spring:
   application:
     name: medlab-agent-system
 
+  servlet:
+    multipart:
+      enabled: true
+      max-file-size: ${SPRING_MULTIPART_MAX_FILE_SIZE:100MB}
+      max-request-size: ${SPRING_MULTIPART_MAX_REQUEST_SIZE:100MB}
+
   # Database Configuration - PostgreSQL
   datasource:
     url: jdbc:postgresql://localhost:5432/medlab_db
@@ -41,7 +47,7 @@ jwt:
   secret: ${JWT_SECRET:your-super-secret-key-change-this-in-production-environment-variable}
   expiration: ${JWT_EXPIRATION:86400000}
 
-# LangChain 服务配置
+# LangChain 鏈嶅姟閰嶇疆
 langchain:
   service:
     url: ${LANGCHAIN_SERVICE_URL:http://localhost:8000}
@@ -54,14 +60,34 @@ minio:
   secret-key: ${MINIO_SECRET_KEY:minioadmin}
   bucket-name: ${MINIO_BUCKET:medlab-reports}
 
+# File Upload Configuration
+medlab:
+  upload:
+    dir: ${UPLOAD_DIR:./uploads}
+  server:
+    url: ${SERVER_URL:http://localhost:8080}
+    ocr-access-url: ${OCR_ACCESS_URL:http://host.docker.internal:8080}
+
+# DashScope Configuration (Vision API)
+dashscope:
+  api-key: ${DASHSCOPE_API_KEY:}
+  model: ${DASHSCOPE_MODEL:qwen-vl-plus}
+  base-url: ${DASHSCOPE_BASE_URL:https://dashscope.aliyuncs.com}
+
 # Server Configuration
 server:
   port: 8080
   servlet:
     context-path: /
+    encoding:
+      charset: UTF-8
+      force: true
 
 # Logging Configuration
 logging:
+  charset:
+    console: UTF-8
+    file: UTF-8
   level:
     root: INFO
     com.medlab: DEBUG
@@ -70,3 +96,11 @@ logging:
     file: "%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
   file:
     name: logs/medlab-agent.log
+
+python-ocr:
+  base-url: ${OCR_SERVICE_URL:http://localhost:8001}
+  connect-timeout-millis: 5000
+  response-timeout-seconds: 90
+  read-timeout-seconds: 90
+  write-timeout-seconds: 30
+  max-in-memory-size: 5242880
