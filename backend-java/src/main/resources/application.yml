@@ -71,7 +71,7 @@ medlab:
 # DashScope Configuration (Vision API)
 dashscope:
   api-key: ${DASHSCOPE_API_KEY:}
-  model: ${DASHSCOPE_MODEL:qwen-vl-plus}
+  model: ${DASHSCOPE_MODEL:qwen-vl-plus-2025-05-07}
   base-url: ${DASHSCOPE_BASE_URL:https://dashscope.aliyuncs.com}
 
 # Server Configuration

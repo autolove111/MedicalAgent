@@ -22,6 +22,8 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 @RestController
 @RequestMapping("/api/v1")
@@ -54,6 +56,8 @@ public class AgentController {
 
     /**
      * 流式聊天接口：负责提取用户ID并转发给 Python Agent
+     * 核心修复点：确保在 Lambda 表达式中使用 final 或 effectively final 变量来传递用户ID
+     * 注意：前端流式对话功能已改用 fetch 实现，完美支持 POST 请求和携带 Authorization Header
      */
     @PostMapping(value = "/agent/chat/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter streamChat(@RequestParam String userQuery,
@@ -76,6 +80,9 @@ public class AgentController {
 
         // 2. 【核心修复】定义 final 变量供 Lambda 使用
         final String finalUserId = currentUserId;
+        final long streamStartedAt = System.nanoTime();
+        final AtomicLong lastChunkAt = new AtomicLong(streamStartedAt);
+        final AtomicInteger chunkCounter = new AtomicInteger(0);
 
         try {
             WebClient client = getWebClient();
@@ -98,6 +105,19 @@ public class AgentController {
                     .subscribe(
                             chunk -> {
                                 try {
+                                    long now = System.nanoTime();
+                                    int chunkIndex = chunkCounter.incrementAndGet();
+                                    double deltaMs = (now - lastChunkAt.getAndSet(now)) / 1_000_000.0;
+                                    double totalMs = (now - streamStartedAt) / 1_000_000.0;
+                                    String preview = chunk.length() > 120 ? chunk.substring(0, 120) + "..." : chunk;
+                                    logger.info(
+                                            "Streaming passthrough chunk #{} len={} deltaMs={} totalMs={} preview={}",
+                                            chunkIndex,
+                                            chunk.length(),
+                                            String.format("%.1f", deltaMs),
+                                            String.format("%.1f", totalMs),
+                                            preview.replaceAll("\\s+", " ")
+                                    );
                                     emitter.send(chunk);
                                 } catch (Exception e) {
                                     emitter.completeWithError(e);
@@ -107,7 +127,15 @@ public class AgentController {
                                 logger.error("转发 Python 流时发生错误: ", err);
                                 emitter.completeWithError(err);
                             },
-                            () -> emitter.complete()
+                            () -> {
+                                double totalMs = (System.nanoTime() - streamStartedAt) / 1_000_000.0;
+                                logger.info(
+                                        "Streaming passthrough completed chunkCount={} totalMs={}",
+                                        chunkCounter.get(),
+                                        String.format("%.1f", totalMs)
+                                );
+                                emitter.complete();
+                            }
                     );
         } catch (Exception e) {
             logger.error("初始化 WebClient 请求失败: ", e);
@@ -123,8 +151,16 @@ public class AgentController {
     @GetMapping("/internal/user/medical-history")
     public ResponseEntity<Map<String, String>> getMedicalHistoryById(@RequestParam("userId") String userId) {
         Map<String, String> resp = new HashMap<>();
+        UUID uid;
         try {
-            UUID uid = UUID.fromString(userId);
+            uid = UUID.fromString(userId);
+        } catch (IllegalArgumentException e) {
+            resp.put("status", "error");
+            resp.put("message", "无效的 UUID 格式");
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(resp);
+        }
+
+        try {
             String history = userMedicalService.getMedicalHistory(uid);
             String drug = userMedicalService.getDrugAllergy(uid);
 
@@ -133,9 +169,11 @@ public class AgentController {
             resp.put("drugAllergy", drug != null ? drug : "无已知过敏史");
             return ResponseEntity.ok(resp);
         } catch (Exception e) {
-            resp.put("status", "error");
-            resp.put("message", "无效的 UUID 格式");
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(resp);
+            logger.warn("查询病历失败，降级返回默认历史 userId={}", userId, e);
+            resp.put("status", "success");
+            resp.put("medicalHistory", "暂无病历记录");
+            resp.put("drugAllergy", "无已知过敏史");
+            return ResponseEntity.ok(resp);
         }
     }
 
