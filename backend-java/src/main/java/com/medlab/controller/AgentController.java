@@ -177,6 +177,37 @@ public class AgentController {
         }
     }
 
+    /**
+     * 内部调用接口：供 Python Agent 查询用户年龄分层信息（严格来源于后端数据库）。
+     */
+    @GetMapping("/internal/user/profile")
+    public ResponseEntity<Map<String, Object>> getUserProfileById(@RequestParam("userId") String userId) {
+        Map<String, Object> resp = new HashMap<>();
+        UUID uid;
+        try {
+            uid = UUID.fromString(userId);
+        } catch (IllegalArgumentException e) {
+            resp.put("status", "error");
+            resp.put("message", "无效的 UUID 格式");
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(resp);
+        }
+
+        try {
+            Double ageYears = userMedicalService.getAgeYears(uid);
+            Boolean isPediatric = userMedicalService.isPediatric(uid);
+            resp.put("status", "success");
+            resp.put("ageYears", ageYears);
+            resp.put("isPediatric", isPediatric != null && isPediatric);
+            return ResponseEntity.ok(resp);
+        } catch (Exception e) {
+            logger.warn("查询用户年龄画像失败 userId={}", userId, e);
+            resp.put("status", "success");
+            resp.put("ageYears", null);
+            resp.put("isPediatric", false);
+            return ResponseEntity.ok(resp);
+        }
+    }
+
     @GetMapping("/health")
     public ResponseEntity<Map<String, String>> health() {
         Map<String, String> response = new HashMap<>();

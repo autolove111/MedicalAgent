@@ -1,5 +1,5 @@
 # --- 第一阶段：构建阶段 ---
-FROM docker.m.daocloud.io/library/maven:3.9-eclipse-temurin-17 as builder
+FROM maven:3.9-eclipse-temurin-17 AS builder
 
 # 设置字符集，防止构建过程中的中文乱码
 ENV LANG C.UTF-8
@@ -16,7 +16,7 @@ RUN mvn clean package -DskipTests -q
 
 # --- 第二阶段：运行阶段 ---
 # 使用 jre-alpine 版本，镜像体积更小（约 100MB+）
-FROM docker.m.daocloud.io/library/eclipse-temurin:17-jre-alpine
+FROM eclipse-temurin:17-jre-alpine
 
 # 设置运行时字符集环境（非常重要！）
 ENV LANG C.UTF-8

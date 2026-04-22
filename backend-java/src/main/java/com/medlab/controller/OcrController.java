@@ -63,13 +63,13 @@ public class OcrController {
      * @return 异步识别结果
      * 
      * 示例请求：
-     * POST /api/v1/ocr/analyze-vision?filePath=/uploads/report.jpg&model=qwen-vl-plus
+    * POST /api/v1/ocr/analyze-vision?filePath=/uploads/report.jpg&model=qwen3-vl-32b-thinking
      * 
      * 示例响应（200 OK）:
      * {
      *   "status": "success",
      *   "file_path": "/uploads/report.jpg",
-     *   "model": "qwen-vl-plus",
+    *   "model": "qwen3-vl-32b-thinking",
      *   "analysis": [
      *     {
      *       "item": "红细胞计数",
@@ -216,11 +216,11 @@ public class OcrController {
     public ResponseEntity<Map<String, Object>> getAvailableModels() {
         return ResponseEntity.ok().body(Map.of(
             "models", List.of(
-                Map.of(
-                    "name", "qwen-vl-plus",
-                    "description", "阿里千问（默认，最快，最便宜，中文优化）",
-                    "is_default", true
-                ),
+                                Map.of(
+                                    "name", "qwen3-vl-32b-thinking",
+                                    "description", "阿里千问（默认，最快，最便宜，中文优化）",
+                                    "is_default", true
+                                ),
                 Map.of(
                     "name", "gpt-4o",
                     "description", "OpenAI GPT-4o（最强，昂贵）",

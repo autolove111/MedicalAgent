@@ -3,8 +3,6 @@ package com.medlab.config;
 import io.netty.channel.ChannelOption;
 import io.netty.handler.timeout.ReadTimeoutHandler;
 import io.netty.handler.timeout.WriteTimeoutHandler;
-import lombok.Data;
-import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpHeaders;
@@ -15,7 +13,6 @@ import org.springframework.web.reactive.function.client.ExchangeStrategies;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import reactor.netty.http.client.HttpClient;
-import reactor.netty.resources.ConnectionProvider;
 
 import java.util.concurrent.TimeUnit;
 
@@ -117,57 +114,4 @@ public class WebClientConfig {
     public RestTemplate restTemplate() {
         return new RestTemplate();
     }
-}
-
-/**
- * Python OCR 服务配置属性
- * 
- * 支持在 application.yml 中配置：
- * ```yaml
- * python-ocr:
- *   base-url: http://python-ocr:8001
- *   max-connections: 50
- *   connect-timeout-millis: 5000
- *   response-timeout-seconds: 60
- *   read-timeout-seconds: 60
- *   write-timeout-seconds: 10
- *   max-in-memory-size: 5242880  # 5MB
- * ```
- */
-@Data
-@ConfigurationProperties(prefix = "python-ocr")
-class PythonOcrServiceProperties {
-    
-    // 📍 Python OCR 服务基础 URL（来自 docker-compose 服务名）
-    private String baseUrl = "http://python-ocr:8001";
-    
-    // 🔌 连接池配置
-    
-    // 最大同时连接数（考虑 Python 服务的并发能力）
-    private int maxConnections = 50;
-    
-    // 等待获取连接的最大挂起数
-    private int pendingAcquireMaxCount = 250;
-    
-    // 等待获取连接的超时时间（秒）
-    private long pendingAcquireTimeoutSeconds = 45;
-    
-    // ⏱️ 超时配置
-    
-    // TCP 连接建立超时（毫秒）
-    private int connectTimeoutMillis = 5000;
-    
-    // 响应超时（秒）- 从请求开始到收到完整响应
-    private long responseTimeoutSeconds = 60;
-    
-    // 读取超时（秒）- 等待单个数据包的时间
-    private long readTimeoutSeconds = 60;
-    
-    // 写入超时（秒）- 发送数据包的最大时间
-    private long writeTimeoutSeconds = 10;
-    
-    // 💾 编解码器配置
-    
-    // 最大内存缓冲大小（用于响应体 - 5MB）
-    private int maxInMemorySize = 5 * 1024 * 1024;
 }

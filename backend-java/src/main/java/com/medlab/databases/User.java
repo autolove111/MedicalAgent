@@ -36,6 +36,9 @@ public class User {
     
     @Column(nullable = false, length = 255)
     private String passwordHash;
+
+    @Column
+    private Integer age;
     
     @Column(columnDefinition = "TEXT")
     private String drugAllergy;
