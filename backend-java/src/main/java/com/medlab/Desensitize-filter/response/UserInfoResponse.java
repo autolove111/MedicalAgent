@@ -20,4 +20,6 @@ public class UserInfoResponse {
     private UUID id;
 
     private String realName;
+
+    private Integer age;
 }

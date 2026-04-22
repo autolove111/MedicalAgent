@@ -4,7 +4,7 @@ import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 @Data
-@ConfigurationProperties(prefix = "medlab.python-ocr")
+@ConfigurationProperties(prefix = "python-ocr")
 public class PythonOcrServiceProperties {
     
     /**

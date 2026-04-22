@@ -1,314 +1,232 @@
-"""
-医学知识库和病历查询增强模块
-提供参考范围查询、指标异常检测等功能
+"""Minimal medical_knowledge compatibility shim.
+
+当前系统多处导入 `knowledge.medical_knowledge`，但仓库中缺失该模块导致导入失败。
+此文件提供最小实现以避免服务启动/运行时崩溃，并可逐步替换为完整实现。
+
+提供：
+- create_knowledge_base(): 返回可被调用的知识库对象或 None
+- PatientHistoryEnhancer: 包装类，提供 enhance_medical_summary(history, labs)
+
+之后可由你替换为实际知识库构建逻辑（向量库、数据库接入等）。
 """
 
+from typing import Any, Dict, Optional, List, Tuple
+import os
 import logging
-from typing import Dict, List, Optional, Tuple
-from .reference_ranges import REFERENCE_RANGES, get_reference_range, format_reference_text
+import json
+
+from core.config import settings
+from knowledge.reference_ranges import get_reference_range
 
 logger = logging.getLogger(__name__)
 
 
-class MedicalKnowledgeBase:
-    """医学知识库 - 提供参考范围和指标诊断"""
-    
-    def __init__(self):
-        self.reference_ranges = REFERENCE_RANGES
-        self.indicator_mapping = self._build_indicator_mapping()
-    
-    def _build_indicator_mapping(self) -> Dict[str, List[str]]:
-        """构建指标到科室的映射表"""
-        return {
-            "肾内科": ["Cr", "BUN", "eGFR", "UA", "Na", "K", "Cl", "Ca", "P"],
-            "血液科": ["WBC", "RBC", "HB", "HCT", "PLT"],
-            "肝胆病科": ["ALT", "AST", "GGT", "ALP", "TBIL", "DBIL"],
-            "内分泌科": ["GLU", "CHOL", "TG", "HDL", "LDL"],
-            "心内科": ["Ca", "K", "CHOL", "TG", "HDL", "LDL"],
-            "感染科": ["WBC", "PLT", "Cr", "ALT"],
-        }
-    
-    def get_reference_range(self, indicator: str, gender: Optional[str] = None) -> Dict:
-        """
-        获取指标参考范围
-        
-        Args:
-            indicator: 指标代码（如 'Cr', 'WBC'）
-            gender: 性别（'M' 或 'F'），某些指标需要
-        
-        Returns:
-            参考范围字典
-        """
-        ref = self.reference_ranges.get(indicator.upper())
-        if not ref:
-            return {}
-        
-        result = ref.copy()
-        
-        # 性别特异性参考范围处理
-        if gender and gender.upper() in ["M", "MALE", "男", "男性"]:
-            if "male" in ref:
-                result["range"] = ref["male"]
-            elif "normal" in ref:
-                result["range"] = ref["normal"]
-        elif gender and gender.upper() in ["F", "FEMALE", "女", "女性"]:
-            if "female" in ref:
-                result["range"] = ref["female"]
-            elif "normal" in ref:
-                result["range"] = ref["normal"]
-        elif "male" in ref or "female" in ref:
-            # 如果没有指定性别但有性别差异，返回两个范围
-            pass
-        elif "normal" in ref:
-            result["range"] = ref["normal"]
-        
-        return result
-    
-    def check_abnormality(
-        self, 
-        indicator: str, 
-        value: float, 
-        gender: Optional[str] = None
-    ) -> Dict:
-        """
-        检查指标是否异常
-        
-        Returns:
-            {
-                "is_abnormal": bool,
-                "level": "critical" | "high" | "low" | "normal",
-                "message": str,
-                "min_normal": float,
-                "max_normal": float
-            }
-        """
-        ref = self.get_reference_range(indicator, gender)
-        if not ref:
-            return {"is_abnormal": False, "message": f"未知指标: {indicator}"}
-        
-        result = {
-            "indicator": indicator,
-            "value": value,
-            "is_abnormal": False,
-            "level": "normal",
-            "message": ""
-        }
-        
-        # 获取正常范围
-        normal_range = ref.get("range") or {}
-        if not normal_range:
-            return result
-        
-        min_normal = normal_range.get("min")
-        max_normal = normal_range.get("max")
-        
-        result["min_normal"] = min_normal
-        result["max_normal"] = max_normal
-        
-        # 检查危急值
-        if "critical_low" in ref and value < ref["critical_low"]:
-            result["is_abnormal"] = True
-            result["level"] = "critical"
-            result["message"] = f"⚠️⚠️【危急值】{ref['name']}严重过低（{value} {ref.get('unit', '')}）"
-            return result
-        
-        if "critical_high" in ref and value > ref["critical_high"]:
-            result["is_abnormal"] = True
-            result["level"] = "critical"
-            result["message"] = f"🚨【危急值】{ref['name']}严重过高（{value} {ref.get('unit', '')}）"
-            return result
-        
-        # 检查异常范围
-        if min_normal is not None and value < min_normal:
-            result["is_abnormal"] = True
-            result["level"] = "low"
-            result["message"] = f"↓ {ref['name']} 过低（{value} {ref.get('unit', '')}，正常值 ≥{min_normal}）"
-        elif max_normal is not None and value > max_normal:
-            result["is_abnormal"] = True
-            result["level"] = "high"
-            result["message"] = f"↑ {ref['name']} 过高（{value} {ref.get('unit', '')}，正常值 ≤{max_normal}）"
-        else:
-            result["message"] = f"✓ {ref['name']} 正常（{value} {ref.get('unit', '')}）"
-        
-        return result
-    
-    def analyze_lab_results(
-        self, 
-        results: Dict[str, float], 
-        gender: Optional[str] = None
-    ) -> Dict:
-        """
-        批量分析实验室结果
-        
-        Args:
-            results: {"Cr": 120, "BUN": 25, ...}
-            gender: 患者性别
-        
-        Returns:
-            分析报告
-        """
-        abnormalities = []
-        normals = []
-        unknowns = []
-        
-        for indicator, value in results.items():
-            check = self.check_abnormality(indicator, value, gender)
-            if "message" in check and check["message"]:
-                if check["is_abnormal"]:
-                    abnormalities.append(check)
-                else:
-                    normals.append(check)
+try:
+    from langchain_community.vectorstores import FAISS
+    from langchain_community.embeddings import DashScopeEmbeddings
+    from langchain_community.document_loaders import TextLoader, DirectoryLoader
+    from langchain.text_splitter import RecursiveCharacterTextSplitter
+    from langchain_core.documents import Document
+except Exception:
+    FAISS = None
+    DashScopeEmbeddings = None
+    TextLoader = None
+    DirectoryLoader = None
+    RecursiveCharacterTextSplitter = None
+    Document = None
+
+
+class KnowledgeBase:
+    """医学知识库实现：加载文本语料，优先使用 DashScope+FAISS 向量检索，缺省时退回文本检索。"""
+
+    def __init__(self, base_dir: Optional[str] = None):
+        self.base_dir = base_dir or os.path.dirname(os.path.abspath(__file__))
+        self.docs: List[Dict[str, Any]] = []  # {source, path, text}
+        self.vectorstore = None
+        self.embeddings = None
+        self._load_text_corpus()
+        # 尝试构建向量索引（若 DashScope API key 可用）
+        try:
+            self._build_vectorstore()
+        except Exception as e:
+            logger.warning(f"知识库向量索引构建失败，回退为文本检索: {e}")
+
+    def _load_text_corpus(self):
+        # 加载科室文档和主语料目录
+        candidates = [
+            os.path.join(self.base_dir, "dept_agent_docs"),
+            os.path.join(self.base_dir, "main_agent_docs"),
+            os.path.join(self.base_dir, "medical_docs"),
+        ]
+        for d in candidates:
+            if not os.path.isdir(d):
+                continue
+            for root, _, files in os.walk(d):
+                for f in files:
+                    if not f.lower().endswith('.txt'):
+                        continue
+                    p = os.path.join(root, f)
+                    try:
+                        with open(p, 'r', encoding='utf-8') as fh:
+                            text = fh.read()
+                        self.docs.append({"source": os.path.relpath(p, self.base_dir), "path": p, "text": text})
+                    except Exception as e:
+                        logger.warning(f"读取语料失败: {p} | {e}")
+        logger.info(f"KnowledgeBase: 加载文本语料 {len(self.docs)} 条")
+
+    def _build_vectorstore(self):
+        if not DashScopeEmbeddings or not FAISS:
+            raise RuntimeError("缺少向量检索依赖（DashScope/FAISS）")
+        api_key = getattr(settings, 'DASHSCOPE_API_KEY', None)
+        if not api_key:
+            raise RuntimeError("DashScope API Key 未配置")
+
+        self.embeddings = DashScopeEmbeddings(model="text-embedding-v3", dashscope_api_key=api_key)
+
+        # 使用 DirectoryLoader 读取文本并分块
+        corpus_paths = []
+        for doc in self.docs:
+            corpus_paths.append(doc['path'])
+
+        # 临时写入一个聚合目录 loader（避免复杂依赖）
+        documents: List[Document] = []
+        try:
+            for p in corpus_paths:
+                loader = TextLoader(p, encoding='utf-8')
+                documents.extend(loader.load())
+        except Exception as e:
+            logger.warning(f"构建 vector 文档加载失败: {e}")
+
+        splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+        chunks = splitter.split_documents(documents)
+        if not chunks:
+            raise RuntimeError("文档分割产生空块，无法构建向量库")
+
+        # 分批构建 FAISS
+        vectorstore = None
+        batch_size = 10
+        for i in range(0, len(chunks), batch_size):
+            batch = chunks[i:i+batch_size]
+            if vectorstore is None:
+                vectorstore = FAISS.from_documents(batch, self.embeddings)
             else:
-                unknowns.append(indicator)
-        
-        # 根据异常指标推荐科室
-        recommended_departments = self._recommend_departments(abnormalities)
-        
-        return {
-            "status": "OK" if not abnormalities else "ABNORMAL",
-            "abnormalities": abnormalities,
-            "normals": normals,
-            "unknowns": unknowns,
-            "recommended_departments": recommended_departments,
-            "summary": self._generate_summary(abnormalities, normals)
-        }
-    
-    def _recommend_departments(self, abnormalities: List[Dict]) -> List[str]:
-        """根据异常指标推荐科室"""
-        departments = {}
-        
-        for abnormality in abnormalities:
-            indicator = abnormality.get("indicator", "").upper()
-            for dept, indicators in self.indicator_mapping.items():
-                if indicator in indicators:
-                    departments[dept] = departments.get(dept, 0) + 1
-        
-        # 按相关性排序
-        sorted_depts = sorted(departments.items(), key=lambda x: x[1], reverse=True)
-        return [dept for dept, _ in sorted_depts]
-    
-    def _generate_summary(self, abnormalities: List[Dict], normals: List[Dict]) -> str:
-        """生成结果摘要"""
-        if not abnormalities and normals:
-            return "所有检查指标在正常范围内，身体状况良好。"
-        
-        if abnormalities:
-            critical = [a for a in abnormalities if a["level"] == "critical"]
-            high = [a for a in abnormalities if a["level"] == "high"]
-            low = [a for a in abnormalities if a["level"] == "low"]
-            
-            summary = ""
-            if critical:
-                summary += f"【危急值】{len(critical)}项指标异常；"
-            if high:
-                summary += f"【升高】{len(high)}项指标升高；"
-            if low:
-                summary += f"【降低】{len(low)}项指标降低；"
-            
-            return summary.rstrip("；") + "。建议及时就医。"
-        
-        return "检查完成。"
-    
-    def get_formatted_reference_text(self, indicator: str) -> str:
-        """获取指标的格式化说明"""
-        return format_reference_text(indicator)
+                vectorstore.add_documents(batch)
+
+        self.vectorstore = vectorstore
+        logger.info("KnowledgeBase: 向量索引构建完成")
+
+    def search(self, query: str, top_k: int = 3) -> List[Tuple[str, str]]:
+        """检索知识库：返回 (source, snippet) 列表。"""
+        if self.vectorstore:
+            try:
+                retriever = self.vectorstore.as_retriever(search_kwargs={"k": top_k})
+                docs = retriever.get_relevant_documents(query)
+                return [(getattr(d, 'metadata', {}).get('source', 'unknown'), d.page_content) for d in docs]
+            except Exception as e:
+                logger.warning(f"向量检索失败，回退到文本检索: {e}")
+
+        # 退回：简单子串匹配，按出现次数排序
+        hits: List[Tuple[str, int, str]] = []
+        qlow = query.lower()
+        for doc in self.docs:
+            text = doc.get('text', '')
+            cnt = text.lower().count(qlow)
+            if cnt > 0:
+                snippet = text[:1000]
+                hits.append((doc.get('source', 'unknown'), cnt, snippet))
+        hits.sort(key=lambda x: x[1], reverse=True)
+        return [(h[0], h[2]) for h in hits[:top_k]]
+
+    def check_abnormality(self, indicator: str, value: float, age_group: str = None, gender: str = None) -> Dict[str, Any]:
+        """基于 reference_ranges 判定异常性并返回结构化信息。"""
+        try:
+            numeric = float(value)
+        except Exception:
+            return {"is_abnormal": False, "level": "unknown", "detail": "非数值"}
+
+        ref = get_reference_range(indicator)
+        if not ref:
+            return {"is_abnormal": False, "level": "unknown", "detail": "无参考范围"}
+
+        # 选择参考范围优先级：gender -> normal -> adult
+        low = None
+        high = None
+        if gender and gender.lower().startswith('f') and isinstance(ref.get('female'), dict):
+            low = ref.get('female', {}).get('min')
+            high = ref.get('female', {}).get('max')
+        elif gender and gender.lower().startswith('m') and isinstance(ref.get('male'), dict):
+            low = ref.get('male', {}).get('min')
+            high = ref.get('male', {}).get('max')
+        elif isinstance(ref.get('normal'), dict):
+            low = ref.get('normal', {}).get('min')
+            high = ref.get('normal', {}).get('max')
+        elif isinstance(ref.get('adult'), dict):
+            low = ref.get('adult', {}).get('min')
+            high = ref.get('adult', {}).get('max')
+
+        is_abnormal = False
+        level = 'normal'
+        detail = ''
+
+        if low is not None and numeric < low:
+            is_abnormal = True
+            level = 'low'
+            detail = f"{indicator}={numeric} 低于参考下限 {low}"
+        elif high is not None and numeric > high:
+            is_abnormal = True
+            # 判断危急程度
+            crit_high = ref.get('critical_high')
+            if crit_high is not None and numeric >= crit_high:
+                level = 'critical'
+            else:
+                level = 'high'
+            detail = f"{indicator}={numeric} 高于参考上限 {high}"
+
+        return {"is_abnormal": is_abnormal, "level": level, "detail": detail, "value": numeric, "low": low, "high": high}
+
+    def analyze_lab_results(self, lab_results: Dict[str, float], gender: str = None) -> Dict[str, Any]:
+        """对一组检验值进行快速总结分析，返回异常包与建议要点。"""
+        out = {"abnormalities": {}, "recommendations": []}
+        for ind, val in (lab_results or {}).items():
+            chk = self.check_abnormality(ind, val, gender=gender)
+            out['abnormalities'][ind] = chk
+            if chk.get('is_abnormal'):
+                out['recommendations'].append(f"{ind} 异常: {chk.get('detail')}")
+        return out
 
 
 class PatientHistoryEnhancer:
-    """患者病历增强器 - 补充参考范围和历史对比"""
-    
-    def __init__(self, kb: Optional[MedicalKnowledgeBase] = None):
-        self.kb = kb or MedicalKnowledgeBase()
-    
-    def enhance_medical_summary(
-        self,
-        base_summary: str,
-        current_results: Optional[Dict[str, float]] = None,
-        gender: Optional[str] = None
-    ) -> str:
-        """
-        增强病历摘要，添加参考范围和异常检测
-        
-        Args:
-            base_summary: 基础病历摘要（来自数据库）
-            current_results: 当前检验结果
-            gender: 患者性别
-        
-        Returns:
-            增强后的病历摘要
-        """
-        enhanced = base_summary + "\n"
-        
-        if current_results:
-            analysis = self.kb.analyze_lab_results(current_results, gender)
-            
-            enhanced += "\n【当前检验结果分析】\n"
-            enhanced += f"状态：{analysis['status']}\n"
-            enhanced += f"汇总：{analysis['summary']}\n"
-            
-            if analysis['abnormalities']:
-                enhanced += "\n【异常指标】\n"
-                for abnorm in analysis['abnormalities']:
-                    enhanced += f"- {abnorm['message']}\n"
-                    # 添加参考范围
-                    if abnorm.get('min_normal') is not None:
-                        enhanced += f"  参考范围：{abnorm['min_normal']} - {abnorm.get('max_normal', '∞')} {abnorm.get('unit', '')}\n"
-            
-            if analysis['recommended_departments']:
-                enhanced += f"\n【建议科室】{', '.join(analysis['recommended_departments'])}\n"
-        
-        return enhanced
+    """基于知识库的病史增强器：用 RAG/KB 检索为病史补充相关知识片段。"""
+
+    def __init__(self, kb: Optional[KnowledgeBase]):
+        self.kb = kb
+
+    def enhance_medical_summary(self, history_text: str, lab_results: Dict[str, float]) -> str:
+        if not history_text:
+            history_text = ""
+        if not self.kb or not lab_results:
+            return history_text
+
+        # 取 top 3 指标作为检索触发词
+        keys = list(lab_results.keys())[:3]
+        query = history_text + "\n关键检验指标: " + ",".join(keys)
+        hits = self.kb.search(query, top_k=3)
+        if hits:
+            snippets = []
+            for src, snip in hits:
+                snippets.append(f"【{src}】 {snip[:400]}")
+            return history_text + "\n【知识库补充】\n" + "\n".join(snippets)
+        return history_text
 
 
-# 导出函数供外部使用
-def create_knowledge_base() -> MedicalKnowledgeBase:
-    """创建医学知识库实例"""
-    return MedicalKnowledgeBase()
+def create_knowledge_base() -> KnowledgeBase:
+    """工厂函数：构建并返回 KnowledgeBase 实例。"""
+    try:
+        kb = KnowledgeBase()
+        return kb
+    except Exception as e:
+        logger.warning(f"创建 KnowledgeBase 失败，返回占位 None: {e}")
+        return None
 
 
-def enhance_patient_context(
-    base_summary: str,
-    results: Optional[Dict[str, float]] = None,
-    gender: Optional[str] = None
-) -> str:
-    """便捷函数：直接增强患者上下文"""
-    enhancer = PatientHistoryEnhancer()
-    return enhancer.enhance_medical_summary(base_summary, results, gender)
-
-
-if __name__ == "__main__":
-    # 测试
-    kb = MedicalKnowledgeBase()
-    
-    # 测试单个指标异常检测
-    print("=" * 60)
-    print("单个指标检查")
-    print("=" * 60)
-    check = kb.check_abnormality("Cr", 150, gender="M")
-    print(check)
-    
-    print("\n" + "=" * 60)
-    print("批量分析")
-    print("=" * 60)
-    
-    # 测试批量分析
-    results = {
-        "Cr": 150,      # 异常升高
-        "BUN": 15,      # 异常升高
-        "WBC": 3.0,     # 异常降低
-        "HB": 140,      # 正常
-        "PLT": 200,     # 正常
-    }
-    
-    analysis = kb.analyze_lab_results(results, gender="M")
-    print(f"状态：{analysis['status']}")
-    print(f"摘要：{analysis['summary']}")
-    print(f"推荐科室：{analysis['recommended_departments']}")
-    
-    print("\n" + "=" * 60)
-    print("病历增强")
-    print("=" * 60)
-    
-    base_summary = "患者既往史：无\n过敏药物：无"
-    enhanced = enhance_patient_context(base_summary, results, gender="M")
-    print(enhanced)
+__all__ = ["create_knowledge_base", "PatientHistoryEnhancer", "KnowledgeBase"]

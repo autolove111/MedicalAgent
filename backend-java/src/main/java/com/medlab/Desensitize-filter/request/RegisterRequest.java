@@ -5,7 +5,10 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Size;
 
 /**
@@ -30,4 +33,9 @@ public class RegisterRequest {
     
     @NotBlank(message = "确认密码不能为空")
     private String confirmPassword;
+
+    @NotNull(message = "年龄不能为空")
+    @Min(value = 0, message = "年龄不能小于0")
+    @Max(value = 150, message = "年龄不能大于150")
+    private Integer age;
 }

@@ -56,6 +56,7 @@ public class AuthService {
         user.setRealName(request.getRealName());
         user.setIdNumber(request.getIdNumber());
         user.setPasswordHash(passwordEncoder.encode(request.getPassword()));
+        user.setAge(request.getAge());
         
         User savedUser = userRepository.save(user);
         
@@ -165,6 +166,7 @@ public class AuthService {
         return UserInfoResponse.builder()
                 .id(user.getId())
                 .realName(user.getRealName())
+            .age(user.getAge())
                 .build();
     }
 }
