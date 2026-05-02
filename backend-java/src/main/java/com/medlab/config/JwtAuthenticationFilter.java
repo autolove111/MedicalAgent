@@ -24,21 +24,21 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     @Override
     protected void doFilterInternal(HttpServletRequest request,
-                                    HttpServletResponse response,
-                                    FilterChain filterChain) throws ServletException, IOException {
+            HttpServletResponse response,
+            FilterChain filterChain) throws ServletException, IOException {
         // 【修复】内部接口和公开接口直接放行，不需要 JWT 验证
         String path = request.getRequestURI();
-        if (path.startsWith("/api/v1/internal/") || 
-            path.startsWith("/api/v1/auth/") ||
-            path.startsWith("/api/v1/agent/") ||
-            path.equals("/api/v1/health") ||
-            path.equals("/") ||
-            path.startsWith("/static/") ||
-            path.startsWith("/assets/")) {
+        if (path.startsWith("/api/v1/internal/") ||
+                path.startsWith("/api/v1/auth/") ||
+                path.startsWith("/api/v1/agent/") ||
+                path.equals("/api/v1/health") ||
+                path.equals("/") ||
+                path.startsWith("/static/") ||
+                path.startsWith("/assets/")) {
             filterChain.doFilter(request, response);
             return;
         }
-        
+
         String header = request.getHeader("Authorization");
 
         if (header != null && header.startsWith("Bearer ")) {
@@ -46,8 +46,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             try {
                 if (jwtTokenProvider.validateToken(token)) {
                     String idNumber = jwtTokenProvider.getIdNumberFromToken(token);
-                    UsernamePasswordAuthenticationToken auth =
-                            new UsernamePasswordAuthenticationToken(idNumber, null, Collections.emptyList());
+                    UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(idNumber, null,
+                            Collections.emptyList());
                     SecurityContextHolder.getContext().setAuthentication(auth);
                 }
             } catch (Exception e) {
